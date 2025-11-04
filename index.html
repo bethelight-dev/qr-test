@@ -333,7 +333,7 @@
 <body>
     <div class="container">
         <h1>BE THE LIGHT</h1>
-        <div class="version">v3.4.0 - Smart Encoding</div>
+        <div class="version">v3.5.0 - Smart Encoding</div>
         <div class="subtitle">Умное кодирование с заголовком длины и псевдо-точками</div>
 
         <div class="tabs">
@@ -1319,38 +1319,83 @@
                 }
                 
                 console.log(`📊 Прочитано битов: верх=${topBits.length}, низ=${bottomBits.length}`);
+                console.log(`🔢 Первые биты верха: ${topBits.substring(0, 32)}`);
+                console.log(`🔢 Первые биты низа: ${bottomBits.substring(0, 32)}`);
                 
-                // 5. Собираем биты в зависимости от режима распределения
-                // Пробуем режим interleave (чередование)
-                let fullBinary = '';
-                for (let i = 0; i < Math.max(topBits.length, bottomBits.length); i++) {
-                    if (i < topBits.length) fullBinary += topBits[i];
-                    if (i < bottomBits.length) fullBinary += bottomBits[i];
+                // 5. Пробуем все три режима распределения
+                const modes = ['split', 'interleave', 'zigzag'];
+                let bestResult = null;
+                let bestMode = null;
+                
+                for (const mode of modes) {
+                    console.log(`\n🔄 Пробуем режим: ${mode}`);
+                    let fullBinary = '';
+                    
+                    if (mode === 'split') {
+                        // Верх + Низ
+                        fullBinary = topBits + bottomBits;
+                    } else if (mode === 'interleave') {
+                        // Чередование: верх[0], низ[0], верх[1], низ[1]...
+                        for (let i = 0; i < Math.max(topBits.length, bottomBits.length); i++) {
+                            if (i < topBits.length) fullBinary += topBits[i];
+                            if (i < bottomBits.length) fullBinary += bottomBits[i];
+                        }
+                    } else if (mode === 'zigzag') {
+                        // Зигзаг: верх слева направо, низ справа налево
+                        fullBinary = topBits;
+                        // Разворачиваем нижние биты построчно
+                        for (let row = 0; row < rows; row++) {
+                            const rowStart = row * gridSize;
+                            const rowEnd = rowStart + gridSize;
+                            const rowBits = bottomBits.substring(rowStart, rowEnd);
+                            fullBinary += rowBits.split('').reverse().join('');
+                        }
+                    }
+                    
+                    console.log(`📝 Полная строка: ${fullBinary.length} бит`);
+                    console.log(`🔢 Первые 32 бита: ${fullBinary.substring(0, 32)}`);
+                    
+                    // Читаем заголовок длины
+                    const lengthBinary = fullBinary.substring(0, 16);
+                    const dataLength = parseInt(lengthBinary, 2);
+                    
+                    console.log(`📏 Длина данных: ${dataLength} бит`);
+                    
+                    // Проверяем валидность длины
+                    if (dataLength > 0 && dataLength <= fullBinary.length - 16 && dataLength <= 1000) {
+                        // Читаем данные
+                        const dataBinary = fullBinary.substring(16, 16 + dataLength);
+                        
+                        // Проверяем что длина кратна 8 (целое число байт)
+                        if (dataLength % 8 === 0) {
+                            const decodedText = binaryToString(dataBinary);
+                            
+                            // Проверяем что текст содержит печатные символы
+                            const printableChars = decodedText.split('').filter(c => {
+                                const code = c.charCodeAt(0);
+                                return code >= 32 && code <= 126 || code >= 1040 && code <= 1103; // ASCII + кириллица
+                            }).length;
+                            
+                            const quality = printableChars / decodedText.length;
+                            console.log(`✓ Декодировано: "${decodedText}" (качество: ${(quality*100).toFixed(0)}%)`);
+                            
+                            if (quality > 0.8 && (!bestResult || decodedText.length > bestResult.length)) {
+                                bestResult = decodedText;
+                                bestMode = mode;
+                            }
+                        }
+                    } else {
+                        console.log(`✗ Некорректная длина данных`);
+                    }
                 }
                 
-                console.log(`📝 Полная строка: ${fullBinary.length} бит`);
-                console.log(`🔢 Первые 32 бита: ${fullBinary.substring(0, 32)}`);
-                
-                // 6. Читаем заголовок длины (первые 16 бит)
-                const lengthBinary = fullBinary.substring(0, 16);
-                const dataLength = parseInt(lengthBinary, 2);
-                
-                console.log(`📏 Длина данных из заголовка: ${dataLength} бит`);
-                
-                if (dataLength <= 0 || dataLength > fullBinary.length - 16) {
-                    console.error('❌ Некорректная длина данных');
+                if (bestResult) {
+                    console.log(`\n✅ Лучший результат (${bestMode}): "${bestResult}"`);
+                    return bestResult;
+                } else {
+                    console.log(`\n❌ Не удалось декодировать ни одним методом`);
                     return null;
                 }
-                
-                // 7. Читаем реальные данные
-                const dataBinary = fullBinary.substring(16, 16 + dataLength);
-                console.log(`📦 Данные: ${dataBinary.length} бит`);
-                
-                // 8. Декодируем в текст
-                const decodedText = binaryToString(dataBinary);
-                console.log(`✅ Декодировано: "${decodedText}"`);
-                
-                return decodedText;
                 
             } catch (error) {
                 console.error('❌ Ошибка декодирования:', error);
