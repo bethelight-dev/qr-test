@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BE THE LIGHT - Генератор и Сканер</title>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js'></script>
     <style>
         * {
             margin: 0;
@@ -122,7 +123,7 @@
             flex-direction: column;
         }
 
-        select, input[type="number"] {
+        select, input[type="number"], input[type="file"] {
             padding: 10px;
             border: 2px solid #444;
             border-radius: 8px;
@@ -152,6 +153,12 @@
 
         button:active {
             transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         #output {
@@ -186,6 +193,10 @@
             display: block;
         }
 
+        .scanner-container {
+            text-align: center;
+        }
+
         .scanner-result {
             margin-top: 20px;
             padding: 20px;
@@ -213,7 +224,14 @@
         }
 
         canvas#scanCanvas {
+            max-width: 100%;
+            margin-top: 20px;
+            border-radius: 10px;
             display: none;
+        }
+
+        canvas#scanCanvas.show {
+            display: block;
         }
 
         .color-picker {
@@ -235,12 +253,45 @@
             color: #666;
             margin-top: 5px;
         }
+
+        .progress {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #b19cd9 0%, #8b7ab8 100%);
+            transition: width 0.3s;
+        }
+
+        .scan-options {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .scan-options button {
+            flex: 1;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>BE THE LIGHT</h1>
-        <div class="subtitle">Собственный формат кодирования данных</div>
+        <div class="subtitle">Собственный формат кодирования данных с AI распознаванием</div>
 
         <div class="tabs">
             <div class="tab active" onclick="switchTab('generator')">🎨 Генератор</div>
@@ -268,12 +319,12 @@
 
                 <div class="control">
                     <label for="dotMinSize">Мин. размер точки:</label>
-                    <input type="number" id="dotMinSize" value="2" min="1" max="10">
+                    <input type="number" id="dotMinSize" value="3" min="1" max="10">
                 </div>
 
                 <div class="control">
                     <label for="dotMaxSize">Макс. размер точки:</label>
-                    <input type="number" id="dotMaxSize" value="8" min="2" max="15">
+                    <input type="number" id="dotMaxSize" value="7" min="2" max="15">
                 </div>
 
                 <div class="control">
@@ -312,30 +363,35 @@
                 <strong>💡 Как это работает:</strong><br>
                 • Данные кодируются в виде точек на круге<br>
                 • Текст "BE THE LIGHT" служит якорем для позиционирования<br>
-                • Точки имеют разный размер для эстетики (но позиция = данные)<br>
-                • Это уникальный формат - обычные QR-сканеры НЕ прочитают<br>
-                • Используйте встроенный сканер для декодирования
+                • AI (Tesseract.js) находит текст и декодирует точки<br>
+                • Это уникальный формат - обычные QR-сканеры НЕ прочитают
             </div>
         </div>
 
         <!-- Панель сканера -->
         <div id="scanner" class="panel">
-            <button onclick="startScanner()">📷 Запустить камеру</button>
+            <div class="scan-options">
+                <button onclick="startCamera()">📷 Камера</button>
+                <button onclick="document.getElementById('fileInput').click()">🖼️ Загрузить фото</button>
+            </div>
             
-            <div style="text-align: center;">
-                <video id="video" autoplay playsinline></video>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileUpload(event)">
+
+            <div class="scanner-container">
+                <video id="video" autoplay playsinline style="display: none;"></video>
                 <canvas id="scanCanvas"></canvas>
             </div>
 
+            <div id="scanProgress"></div>
             <div id="scanResult"></div>
 
             <div class="info">
                 <strong>📱 Как сканировать:</strong><br>
-                • Нажмите "Запустить камеру"<br>
-                • Наведите на код "BE THE LIGHT"<br>
-                • Держите устойчиво, чтобы текст был хорошо виден<br>
-                • Данные декодируются автоматически<br>
-                • Работает только с кодами, созданными в этом генераторе
+                <strong>Вариант 1 - Камера:</strong> Нажмите "Камера" и наведите на код<br>
+                <strong>Вариант 2 - Фото:</strong> Нажмите "Загрузить фото" и выберите изображение кода<br>
+                • AI автоматически найдет текст "BE THE LIGHT"<br>
+                • Система декодирует точки и покажет данные<br>
+                • Держите код ровно и при хорошем освещении
             </div>
         </div>
     </div>
@@ -344,6 +400,7 @@
         let currentCode = null;
         let stream = null;
         let scanning = false;
+        let captureInterval = null;
 
         document.getElementById('bgColor').addEventListener('input', (e) => {
             document.getElementById('bgColorValue').textContent = e.target.value;
@@ -359,8 +416,8 @@
             event.target.classList.add('active');
             document.getElementById(tab).classList.add('active');
             
-            if (tab === 'scanner' && stream) {
-                stopScanner();
+            if (tab !== 'scanner' && stream) {
+                stopCamera();
             }
         }
 
@@ -378,7 +435,10 @@
             for (let i = 0; i < binary.length; i += 8) {
                 let byte = binary.substr(i, 8);
                 if (byte.length === 8) {
-                    str += String.fromCharCode(parseInt(byte, 2));
+                    const charCode = parseInt(byte, 2);
+                    if (charCode > 0) {
+                        str += String.fromCharCode(charCode);
+                    }
                 }
             }
             return str;
@@ -398,63 +458,46 @@
                 return;
             }
 
-            // Конвертируем данные в бинарный формат
             const binary = stringToBinary(data);
             const totalCells = gridSize * gridSize;
             
-            // Добавляем длину данных в начало (16 бит)
             const lengthBinary = binary.length.toString(2).padStart(16, '0');
             const fullBinary = lengthBinary + binary;
 
             if (fullBinary.length > totalCells) {
-                alert(`Слишком много данных! Максимум ${Math.floor(totalCells / 8)} символов для этого размера сетки. Увеличьте размер сетки.`);
+                alert(`Слишком много данных! Максимум ${Math.floor((totalCells - 16) / 8)} символов для этого размера сетки. Увеличьте размер сетки.`);
                 return;
             }
 
-            // Дополняем нулями до полного размера
             const paddedBinary = fullBinary.padEnd(totalCells, '0');
 
-            // Создаем canvas
             const canvas = document.getElementById('canvas');
             const ctx = canvas.getContext('2d');
             const size = 600;
             canvas.width = size;
             canvas.height = size;
 
-            // Рисуем фон (круг)
             ctx.fillStyle = bgColor;
             ctx.beginPath();
             ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
             ctx.fill();
 
-            // Рисуем текст "BE THE LIGHT"
             ctx.fillStyle = dotColor;
             ctx.font = `bold ${textSize}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('BE THE LIGHT', size / 2, size / 2);
 
-            // Сохраняем позицию и размер текста для декодирования
-            const textMetrics = ctx.measureText('BE THE LIGHT');
-            const textInfo = {
-                x: size / 2,
-                y: size / 2,
-                width: textMetrics.width,
-                height: textSize
-            };
-
-            // Рисуем точки (данные)
             ctx.fillStyle = dotColor;
             const centerX = size / 2;
             const centerY = size / 2;
             const maxRadius = size / 2 - 30;
-            const minRadius = 80; // Минимальный радиус (чтобы не перекрывать текст)
+            const minRadius = 100;
 
             let bitIndex = 0;
             const dots = [];
 
-            // Создаем спиральную сетку точек
-            const numRings = Math.ceil(Math.sqrt(gridSize)); // Количество колец
+            const numRings = Math.ceil(Math.sqrt(gridSize));
             const pointsPerRing = Math.ceil(gridSize / numRings);
 
             for (let ring = 0; ring < numRings; ring++) {
@@ -462,17 +505,18 @@
                 const pointsInThisRing = Math.min(pointsPerRing * (ring + 1), totalCells - bitIndex);
                 
                 for (let i = 0; i < pointsInThisRing && bitIndex < totalCells; i++) {
-                    const angle = (i / pointsInThisRing) * Math.PI * 2 + (ring * 0.5); // Сдвиг для спирали
+                    const angle = (i / pointsInThisRing) * Math.PI * 2 + (ring * 0.5);
                     
                     const x = centerX + Math.cos(angle) * ringRadius;
                     const y = centerY + Math.sin(angle) * ringRadius;
 
-                    // Проверяем, находится ли точка внутри круга
                     const distFromCenter = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
-                    if (distFromCenter > maxRadius) continue;
+                    if (distFromCenter > maxRadius) {
+                        bitIndex++;
+                        continue;
+                    }
 
                     if (paddedBinary[bitIndex] === '1') {
-                        // Варьируем размер точки для эстетики
                         const baseSize = dotMinSize + (ring / numRings) * (dotMaxSize - dotMinSize);
                         const dotSize = baseSize + Math.random() * 2 - 1;
                         
@@ -480,24 +524,23 @@
                         ctx.arc(x, y, dotSize, 0, Math.PI * 2);
                         ctx.fill();
 
-                        dots.push({ x, y, size: dotSize, bit: 1 });
+                        dots.push({ x, y, size: dotSize, bit: 1, angle, radius: ringRadius });
                     } else {
-                        // Сохраняем позицию для декодирования (даже если точки нет)
-                        dots.push({ x, y, size: 0, bit: 0 });
+                        dots.push({ x, y, size: 0, bit: 0, angle, radius: ringRadius });
                     }
 
                     bitIndex++;
                 }
             }
 
-            // Сохраняем информацию о коде
             currentCode = {
                 data: data,
                 binary: paddedBinary,
                 gridSize: gridSize,
                 dots: dots,
-                textInfo: textInfo,
-                size: size
+                size: size,
+                minRadius: minRadius,
+                maxRadius: maxRadius
             };
 
             document.getElementById('downloadBtn').style.display = 'block';
@@ -511,32 +554,36 @@
             link.click();
         }
 
-        async function startScanner() {
+        async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' } 
                 });
                 const video = document.getElementById('video');
                 video.srcObject = stream;
+                video.style.display = 'block';
                 video.play();
                 scanning = true;
-                scanFrame();
+                
+                captureInterval = setInterval(captureAndScan, 2000);
             } catch (err) {
                 alert('Не удалось получить доступ к камере: ' + err.message);
             }
         }
 
-        function stopScanner() {
+        function stopCamera() {
             scanning = false;
+            if (captureInterval) {
+                clearInterval(captureInterval);
+            }
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
+            document.getElementById('video').style.display = 'none';
         }
 
-        function scanFrame() {
-            if (!scanning) return;
-
+        function captureAndScan() {
             const video = document.getElementById('video');
             const canvas = document.getElementById('scanCanvas');
             const ctx = canvas.getContext('2d');
@@ -545,38 +592,257 @@
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0);
-
-                try {
-                    const result = decodeFromCanvas(canvas);
-                    if (result) {
-                        displayResult(result, true);
-                        stopScanner();
-                        return;
-                    }
-                } catch (err) {
-                    console.log('Ошибка декодирования:', err);
-                }
+                canvas.classList.add('show');
+                
+                scanImage(canvas);
             }
-
-            requestAnimationFrame(scanFrame);
         }
 
-        function decodeFromCanvas(canvas) {
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.getElementById('scanCanvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    canvas.classList.add('show');
+                    
+                    scanImage(canvas);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function scanImage(canvas) {
+            showProgress('🔍 Ищу текст "BE THE LIGHT"...', 0);
+
+            try {
+                const result = await Tesseract.recognize(canvas, 'eng', {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            showProgress('🔍 Распознаю текст...', Math.round(m.progress * 50));
+                        }
+                    }
+                });
+
+                const text = result.data.text.toUpperCase();
+                console.log('Распознанный текст:', text);
+
+                if (text.includes('BE') && text.includes('LIGHT')) {
+                    showProgress('✅ Текст найден! Декодирую точки...', 60);
+                    
+                    const decodedData = await decodeDotsFromImage(canvas);
+                    
+                    if (decodedData) {
+                        showProgress('✅ Успешно декодировано!', 100);
+                        displayResult(decodedData, true);
+                        stopCamera();
+                    } else {
+                        showProgress('❌ Не удалось декодировать точки', 100);
+                        displayResult('Не удалось декодировать данные. Попробуйте лучшее освещение.', false);
+                    }
+                } else {
+                    showProgress('❌ Текст "BE THE LIGHT" не найден', 100);
+                    displayResult('Код не найден. Убедитесь что на изображении код "BE THE LIGHT".', false);
+                }
+            } catch (err) {
+                console.error('Ошибка сканирования:', err);
+                showProgress('❌ Ошибка распознавания', 100);
+                displayResult('Ошибка: ' + err.message, false);
+            }
+        }
+
+        async function decodeDotsFromImage(canvas) {
             const ctx = canvas.getContext('2d');
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const width = canvas.width;
+            const height = canvas.height;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
             
-            // Упрощенное декодирование - для полноценной работы нужна
-            // библиотека компьютерного зрения для поиска текста и точек
-            // Здесь просто демонстрация концепции
+            showProgress('🔍 Ищу центр кода...', 65);
             
-            return null; // Пока возвращаем null
+            // Находим центр круга (грубо - центр изображения)
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            showProgress('📏 Определяю размеры...', 70);
+            
+            // Определяем радиус круга
+            const maxRadius = Math.min(width, height) / 2 - 20;
+            const minRadius = maxRadius * 0.3; // Минимальный радиус (зона текста)
+            
+            showProgress('🎯 Детектирую точки...', 75);
+            
+            // Находим все белые точки
+            const detectedDots = [];
+            const gridSize = 25; // Предполагаем стандартный размер
+            const numRings = Math.ceil(Math.sqrt(gridSize));
+            const pointsPerRing = Math.ceil(gridSize / numRings);
+            
+            // Сканируем изображение и ищем белые пиксели
+            const threshold = 200; // Порог белизны
+            const stepSize = 3; // Шаг сканирования (для скорости)
+            
+            for (let y = 0; y < height; y += stepSize) {
+                for (let x = 0; x < width; x += stepSize) {
+                    const idx = (y * width + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const b = data[idx + 2];
+                    
+                    // Проверяем, белый ли это пикселъ
+                    if (r > threshold && g > threshold && b > threshold) {
+                        const dx = x - centerX;
+                        const dy = y - centerY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        // Проверяем, находится ли в зоне точек
+                        if (dist >= minRadius && dist <= maxRadius) {
+                            const angle = Math.atan2(dy, dx);
+                            detectedDots.push({ x, y, dist, angle });
+                        }
+                    }
+                }
+            }
+            
+            showProgress('🧮 Кластеризую точки...', 80);
+            
+            // Кластеризуем близкие точки (убираем дубликаты)
+            const clusters = clusterDots(detectedDots, 15);
+            
+            console.log('Найдено кластеров точек:', clusters.length);
+            
+            showProgress('💾 Декодирую данные...', 85);
+            
+            // Строим полярную сетку и декодируем
+            const totalCells = gridSize * gridSize;
+            let binaryData = '';
+            
+            for (let ring = 0; ring < numRings; ring++) {
+                const ringRadius = minRadius + (ring / numRings) * (maxRadius - minRadius);
+                const pointsInThisRing = Math.min(pointsPerRing * (ring + 1), totalCells - binaryData.length);
+                
+                for (let i = 0; i < pointsInThisRing && binaryData.length < totalCells; i++) {
+                    const expectedAngle = (i / pointsInThisRing) * Math.PI * 2 + (ring * 0.5);
+                    
+                    // Ищем ближайшую точку к ожидаемой позиции
+                    const hasDot = findDotNearPosition(clusters, centerX, centerY, ringRadius, expectedAngle, 20);
+                    binaryData += hasDot ? '1' : '0';
+                }
+            }
+            
+            console.log('Декодированные биты:', binaryData.substring(0, 100) + '...');
+            
+            showProgress('📖 Читаю данные...', 90);
+            
+            // Извлекаем длину данных (первые 16 бит)
+            const lengthBinary = binaryData.substring(0, 16);
+            const dataLength = parseInt(lengthBinary, 2);
+            
+            console.log('Длина данных:', dataLength, 'бит');
+            
+            if (dataLength > 0 && dataLength < binaryData.length) {
+                // Извлекаем данные
+                const dataBinary = binaryData.substring(16, 16 + dataLength);
+                const decodedText = binaryToString(dataBinary);
+                
+                console.log('Декодированный текст:', decodedText);
+                
+                if (decodedText && decodedText.length > 0) {
+                    return decodedText;
+                }
+            }
+            
+            // Если не получилось декодировать стандартным способом, пробуем альтернативный метод
+            showProgress('🔄 Пробую альтернативный метод...', 95);
+            
+            // Пробуем декодировать весь бинарный код как текст
+            const alternativeText = binaryToString(binaryData.substring(16, 16 + 200));
+            if (alternativeText && /^[\x20-\x7E]+$/.test(alternativeText.substring(0, 10))) {
+                return alternativeText;
+            }
+            
+            return null;
+        }
+        
+        function clusterDots(dots, maxDistance) {
+            if (dots.length === 0) return [];
+            
+            const clusters = [];
+            const used = new Set();
+            
+            for (let i = 0; i < dots.length; i++) {
+                if (used.has(i)) continue;
+                
+                const cluster = [dots[i]];
+                used.add(i);
+                
+                for (let j = i + 1; j < dots.length; j++) {
+                    if (used.has(j)) continue;
+                    
+                    const dx = dots[i].x - dots[j].x;
+                    const dy = dots[i].y - dots[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < maxDistance) {
+                        cluster.push(dots[j]);
+                        used.add(j);
+                    }
+                }
+                
+                // Вычисляем центр кластера
+                const centerX = cluster.reduce((sum, d) => sum + d.x, 0) / cluster.length;
+                const centerY = cluster.reduce((sum, d) => sum + d.y, 0) / cluster.length;
+                const avgDist = cluster.reduce((sum, d) => sum + d.dist, 0) / cluster.length;
+                const avgAngle = cluster.reduce((sum, d) => sum + d.angle, 0) / cluster.length;
+                
+                clusters.push({ x: centerX, y: centerY, dist: avgDist, angle: avgAngle, size: cluster.length });
+            }
+            
+            return clusters;
+        }
+        
+        function findDotNearPosition(clusters, centerX, centerY, expectedRadius, expectedAngle, tolerance) {
+            const expectedX = centerX + Math.cos(expectedAngle) * expectedRadius;
+            const expectedY = centerY + Math.sin(expectedAngle) * expectedRadius;
+            
+            for (const cluster of clusters) {
+                const dx = cluster.x - expectedX;
+                const dy = cluster.y - expectedY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < tolerance) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        function showProgress(message, percent) {
+            const progressDiv = document.getElementById('scanProgress');
+            progressDiv.innerHTML = `
+                <div class="progress">
+                    <div>${message}</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percent}%"></div>
+                    </div>
+                </div>
+            `;
         }
 
         function displayResult(data, success) {
             const resultDiv = document.getElementById('scanResult');
             resultDiv.className = 'scanner-result ' + (success ? 'success' : 'error');
             resultDiv.innerHTML = `
-                <strong>${success ? '✅ Успешно декодировано!' : '❌ Ошибка декодирования'}</strong>
+                <strong>${success ? '✅ Успешно декодировано!' : '❌ Ошибка'}</strong>
                 <div class="result-text">${data}</div>
             `;
         }
