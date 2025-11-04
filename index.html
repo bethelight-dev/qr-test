@@ -333,7 +333,7 @@
 <body>
     <div class="container">
         <h1>BE THE LIGHT</h1>
-        <div class="version">v3.2.0 - Smart Encoding</div>
+        <div class="version">v3.3.0 - Smart Encoding</div>
         <div class="subtitle">Умное кодирование с заголовком длины и псевдо-точками</div>
 
         <div class="tabs">
@@ -1126,38 +1126,79 @@
         }
 
         function findCircleMarkers(canvas) {
+            console.log('🔍 Ищем маркеры...');
             const ctx = canvas.getContext('2d');
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imageData.data;
             
             const circles = [];
-            const threshold = 200;
-            const step = 10;
+            const threshold = 180; // Понижаем порог для лучшей детекции
+            const step = 8; // Уменьшаем шаг для более точного поиска
+            const minRadius = 8;
+            const maxRadius = 30;
             
-            for (let y = step; y < canvas.height - step; y += step) {
-                for (let x = step; x < canvas.width - step; x += step) {
-                    let whiteCount = 0;
-                    const radius = 20;
+            // Ищем концентрические круги (маркеры)
+            for (let y = maxRadius; y < canvas.height - maxRadius; y += step) {
+                for (let x = maxRadius; x < canvas.width - maxRadius; x += step) {
                     
-                    for (let dy = -radius; dy <= radius; dy += 5) {
-                        for (let dx = -radius; dx <= radius; dx += 5) {
-                            if (dx*dx + dy*dy <= radius*radius) {
-                                const idx = ((y + dy) * canvas.width + (x + dx)) * 4;
-                                if (data[idx] > threshold && data[idx+1] > threshold && data[idx+2] > threshold) {
+                    // Проверяем несколько радиусов
+                    for (let radius = minRadius; radius <= maxRadius; radius += 4) {
+                        let whiteCount = 0;
+                        let totalCount = 0;
+                        
+                        // Проверяем окружность
+                        for (let angle = 0; angle < 360; angle += 15) {
+                            const rad = angle * Math.PI / 180;
+                            const px = Math.round(x + radius * Math.cos(rad));
+                            const py = Math.round(y + radius * Math.sin(rad));
+                            
+                            if (px >= 0 && px < canvas.width && py >= 0 && py < canvas.height) {
+                                const idx = (py * canvas.width + px) * 4;
+                                const brightness = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                                
+                                if (brightness > threshold) {
                                     whiteCount++;
                                 }
+                                totalCount++;
                             }
                         }
-                    }
-                    
-                    if (whiteCount > 30) {
-                        circles.push({ x, y, confidence: whiteCount });
+                        
+                        // Если найден круг с высоким процентом белых пикселей
+                        if (totalCount > 0 && (whiteCount / totalCount) > 0.7) {
+                            // Проверяем, нет ли уже близкого маркера
+                            const isDuplicate = circles.some(c => 
+                                Math.sqrt(Math.pow(c.x - x, 2) + Math.pow(c.y - y, 2)) < 30
+                            );
+                            
+                            if (!isDuplicate) {
+                                circles.push({ 
+                                    x, 
+                                    y, 
+                                    radius, 
+                                    confidence: whiteCount / totalCount 
+                                });
+                                console.log(`✓ Найден маркер: (${x}, ${y}), r=${radius}, уверенность=${(whiteCount/totalCount*100).toFixed(0)}%`);
+                            }
+                            break; // Нашли маркер, переходим к следующей точке
+                        }
                     }
                 }
             }
             
+            console.log(`📊 Всего найдено кандидатов: ${circles.length}`);
+            
+            // Сортируем по уверенности и берем два лучших
             circles.sort((a, b) => b.confidence - a.confidence);
-            return circles.slice(0, 2);
+            const markers = circles.slice(0, 2);
+            
+            if (markers.length >= 2) {
+                console.log(`✅ Выбраны маркеры: (${markers[0].x}, ${markers[0].y}) и (${markers[1].x}, ${markers[1].y})`);
+                console.log(`📏 Расстояние между маркерами: ${Math.sqrt(Math.pow(markers[1].x - markers[0].x, 2) + Math.pow(markers[1].y - markers[0].y, 2)).toFixed(0)}px`);
+            } else {
+                console.log('❌ Недостаточно маркеров найдено');
+            }
+            
+            return markers;
         }
 
         function decodeFromMarkers(canvas, markers) {
