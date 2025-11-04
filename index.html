@@ -333,7 +333,7 @@
 <body>
     <div class="container">
         <h1>BE THE LIGHT</h1>
-        <div class="version">v3.3.0 - Smart Encoding</div>
+        <div class="version">v3.4.0 - Smart Encoding</div>
         <div class="subtitle">Умное кодирование с заголовком длины и псевдо-точками</div>
 
         <div class="tabs">
@@ -1110,12 +1110,18 @@
 
                 const decodedData = decodeFromMarkers(canvas, markers);
                 
-                if (decodedData) {
+                console.log('🔍 Результат декодирования:', decodedData);
+                console.log('🔍 Тип данных:', typeof decodedData);
+                console.log('🔍 Длина:', decodedData ? decodedData.length : 'null');
+                
+                if (decodedData && decodedData.length > 0) {
                     showProgress('✅ Успешно декодировано!', 100);
+                    console.log('✅ Отображаем результат:', decodedData);
                     displayResult(decodedData, true);
                     stopCamera();
                 } else {
                     showProgress('❌ Не удалось декодировать', 100);
+                    console.log('❌ Пустой результат');
                     displayResult('Данные не декодированы. Попробуйте лучшее освещение.', false);
                 }
             } catch (err) {
@@ -1365,12 +1371,22 @@
         }
 
         function displayResult(data, success) {
+            console.log('📺 displayResult вызван:', { data, success });
             const resultDiv = document.getElementById('scanResult');
+            
+            if (!resultDiv) {
+                console.error('❌ Элемент scanResult не найден!');
+                return;
+            }
+            
             resultDiv.className = 'scanner-result ' + (success ? 'success' : 'error');
+            resultDiv.style.display = 'block';
             resultDiv.innerHTML = `
                 <strong>${success ? '✅ Успешно декодировано!' : '❌ Ошибка'}</strong>
-                <div class="result-text">${data}</div>
+                <div class="result-text" style="margin-top: 10px; font-size: 18px; font-weight: bold;">${data || '(пусто)'}</div>
             `;
+            
+            console.log('📺 Результат отображен в элементе');
         }
     </script>
 </body>
