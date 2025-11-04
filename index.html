@@ -28,10 +28,18 @@
         h1 {
             text-align: center;
             color: #b19cd9;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             font-size: 32px;
             text-transform: uppercase;
             letter-spacing: 3px;
+        }
+
+        .version {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-bottom: 5px;
+            font-family: 'Courier New', monospace;
         }
 
         .subtitle {
@@ -291,6 +299,7 @@
 <body>
     <div class="container">
         <h1>BE THE LIGHT</h1>
+        <div class="version">v2.1.0 - Enhanced OCR</div>
         <div class="subtitle">Собственный формат кодирования данных с AI распознаванием</div>
 
         <div class="tabs">
@@ -621,22 +630,56 @@
         }
 
         async function scanImage(canvas) {
-            showProgress('🔍 Ищу текст "BE THE LIGHT"...', 0);
+            showProgress('🔍 Подготавливаю изображение...', 10);
+            
+            // Предобработка изображения для лучшего OCR
+            const preprocessedCanvas = preprocessImage(canvas);
+            
+            showProgress('🔍 Ищу текст "BE THE LIGHT"...', 20);
 
             try {
-                const result = await Tesseract.recognize(canvas, 'eng', {
-                    logger: m => {
-                        if (m.status === 'recognizing text') {
-                            showProgress('🔍 Распознаю текст...', Math.round(m.progress * 50));
+                // Пробуем несколько конфигураций Tesseract
+                const configs = [
+                    { lang: 'eng', psm: 6 }, // Assume uniform block of text
+                    { lang: 'eng', psm: 7 }, // Single text line
+                    { lang: 'eng', psm: 8 }, // Single word
+                ];
+                
+                let foundText = false;
+                let bestResult = null;
+                
+                for (let i = 0; i < configs.length; i++) {
+                    showProgress(`🔍 Попытка распознавания ${i + 1}/${configs.length}...`, 20 + (i * 15));
+                    
+                    const result = await Tesseract.recognize(preprocessedCanvas, configs[i].lang, {
+                        tessedit_pageseg_mode: configs[i].psm,
+                        tessedit_char_whitelist: 'BETHELIGHT ',
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                showProgress(`🔍 Распознаю текст (попытка ${i + 1})...`, 20 + (i * 15) + Math.round(m.progress * 10));
+                            }
                         }
+                    });
+
+                    const text = result.data.text.toUpperCase().replace(/\s+/g, '');
+                    console.log(`Попытка ${i + 1}, распознано:`, text);
+
+                    if (text.includes('BETHELIGHT') || 
+                        text.includes('BETHEL1GHT') || 
+                        text.includes('BETHE') && text.includes('LIGHT')) {
+                        foundText = true;
+                        bestResult = result;
+                        break;
                     }
-                });
+                    
+                    if (!bestResult || result.data.confidence > (bestResult.data.confidence || 0)) {
+                        bestResult = result;
+                    }
+                }
 
-                const text = result.data.text.toUpperCase();
-                console.log('Распознанный текст:', text);
-
-                if (text.includes('BE') && text.includes('LIGHT')) {
+                if (foundText || (bestResult && bestResult.data.confidence > 30)) {
                     showProgress('✅ Текст найден! Декодирую точки...', 60);
+                    console.log('Лучший результат OCR:', bestResult.data.text);
                     
                     const decodedData = await decodeDotsFromImage(canvas);
                     
@@ -645,18 +688,79 @@
                         displayResult(decodedData, true);
                         stopCamera();
                     } else {
-                        showProgress('❌ Не удалось декодировать точки', 100);
-                        displayResult('Не удалось декодировать данные. Попробуйте лучшее освещение.', false);
+                        showProgress('⚠️ Пробую без проверки текста...', 70);
+                        // Пробуем декодировать даже если текст не найден идеально
+                        const forcedDecode = await decodeDotsFromImage(canvas);
+                        if (forcedDecode) {
+                            showProgress('✅ Декодировано!', 100);
+                            displayResult(forcedDecode, true);
+                            stopCamera();
+                        } else {
+                            showProgress('❌ Не удалось декодировать точки', 100);
+                            displayResult('Не удалось декодировать данные. Попробуйте:\n• Лучшее освещение\n• Держать камеру ровно\n• Приблизить код', false);
+                        }
                     }
                 } else {
-                    showProgress('❌ Текст "BE THE LIGHT" не найден', 100);
-                    displayResult('Код не найден. Убедитесь что на изображении код "BE THE LIGHT".', false);
+                    showProgress('⚠️ Текст нечеткий, пробую декодировать...', 65);
+                    console.log('Не удалось точно распознать текст, пробуем декодировать');
+                    
+                    // Пробуем декодировать в любом случае
+                    const decodedData = await decodeDotsFromImage(canvas);
+                    
+                    if (decodedData) {
+                        showProgress('✅ Декодировано!', 100);
+                        displayResult(decodedData, true);
+                        stopCamera();
+                    } else {
+                        showProgress('❌ Код не распознан', 100);
+                        displayResult('Код не найден. Убедитесь что:\n• Код полностью виден\n• Хорошее освещение\n• Камера не трясется', false);
+                    }
                 }
             } catch (err) {
                 console.error('Ошибка сканирования:', err);
                 showProgress('❌ Ошибка распознавания', 100);
                 displayResult('Ошибка: ' + err.message, false);
             }
+        }
+        
+        function preprocessImage(canvas) {
+            const preprocessCanvas = document.createElement('canvas');
+            const ctx = preprocessCanvas.getContext('2d');
+            
+            preprocessCanvas.width = canvas.width;
+            preprocessCanvas.height = canvas.height;
+            
+            // Копируем изображение
+            ctx.drawImage(canvas, 0, 0);
+            
+            // Получаем данные пикселей
+            const imageData = ctx.getImageData(0, 0, preprocessCanvas.width, preprocessCanvas.height);
+            const data = imageData.data;
+            
+            // Увеличиваем контраст и делаем текст четче
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                // Вычисляем яркость
+                const brightness = (r + g + b) / 3;
+                
+                // Увеличиваем контраст
+                const factor = 1.5;
+                const newBrightness = ((brightness - 128) * factor) + 128;
+                
+                // Применяем пороговую обработку для текста
+                if (newBrightness > 180) {
+                    data[i] = data[i + 1] = data[i + 2] = 255; // Белый
+                } else {
+                    data[i] = data[i + 1] = data[i + 2] = Math.max(0, Math.min(255, newBrightness));
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            return preprocessCanvas;
         }
 
         async function decodeDotsFromImage(canvas) {
